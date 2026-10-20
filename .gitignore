@@ -6,3 +6,7 @@ npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
 .vercel/
+.env.local
+atlas-credentials.env
+.env
+vscode-uri.txt

@@ -2,14 +2,21 @@
   "name": "price-monitor",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": "20.x"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.109.0",
     "cheerio": "^1.2.0",
-    "mongoose": "^8.19.1",
+    "dotenv": "^18.0.8",
+    "mongodb": "^7.7.0",
+    "mongoose": "^8.24.5",
     "next": "^15.5.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"

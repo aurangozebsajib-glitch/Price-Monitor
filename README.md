@@ -3,8 +3,8 @@
 ## Pricewise dashboard
 
 This repository includes a Next.js App Router dashboard styled with Tailwind CSS.
-The dashboard is currently a UI prototype: its price-drop cards use sample data,
-and adding a product URL creates a local preview rather than fetching live prices.
+The dashboard includes sample offers and uses the tracking/search APIs for live
+results.
 
 ### Run locally
 
@@ -19,21 +19,29 @@ run `npm run build`.
 The project can be imported into Vercel as a Next.js application; use the default
 build command and output settings.
 
-### MongoDB Atlas
+### Supabase
 
-The Mongoose product model and connection helper are in `lib/models/Product.js`
-and `lib/mongoose.js`. Set `MONGODB_URI` to your MongoDB Atlas connection string
-in the local environment and in the Vercel project environment settings before
-calling the connection helper. Do not commit the connection string.
+Browser, server, and session-refresh clients are in `utils/supabase/`, with
+`lib/supabase.ts` used by server-side API routes. Set the Supabase URL and
+publishable key in the ignored `.env.local` file. Apply `supabase-schema.sql` in
+the Supabase SQL Editor to create the stores, products, product_prices, and
+price_history tables, their RLS policies, and the store seed data. Product and
+price access is restricted to the owning authenticated user; only the store
+catalog is publicly readable.
+
+The `/api/test-db` route checks access to the seeded store catalog.
+The scrape and search routes require a signed-in Supabase user because tracked
+product data is protected by row-level security.
 
 ### Product search and tracking API
 
-- `POST /api/scrape` accepts `{ "url": "https://..." }` to scrape and save a
-  Star Tech or Daraz product, or `{ "query": "..." }` to search both stores.
-- `GET /api/search?q=...` searches stored product titles first and scrapes both
-  stores when no stored products match.
+- `POST /api/scrape` accepts `{ "url": "https://..." }`, scrapes a Star Tech or
+  Daraz product, upserts the user's product and current price, and appends a
+  price-history record when a price is available.
+- `GET /api/search?q=...` searches the signed-in user's tracked products,
+  including their store, latest price, and price-history records, sorted from
+  lowest to highest price.
 
-The API uses server-side HTML/JSON-LD parsing and stores price changes in the
-product's history. Store pages can change their markup or restrict automated
-requests, so scraping results depend on each store's current availability and
-page structure.
+Scraping uses server-side HTML/JSON-LD parsing. Store pages can change their
+markup or restrict automated requests, so results depend on each store's current
+availability and page structure.
