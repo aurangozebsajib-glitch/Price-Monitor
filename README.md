@@ -25,3 +25,15 @@ The Mongoose product model and connection helper are in `lib/models/Product.js`
 and `lib/mongoose.js`. Set `MONGODB_URI` to your MongoDB Atlas connection string
 in the local environment and in the Vercel project environment settings before
 calling the connection helper. Do not commit the connection string.
+
+### Product search and tracking API
+
+- `POST /api/scrape` accepts `{ "url": "https://..." }` to scrape and save a
+  Star Tech or Daraz product, or `{ "query": "..." }` to search both stores.
+- `GET /api/search?q=...` searches stored product titles first and scrapes both
+  stores when no stored products match.
+
+The API uses server-side HTML/JSON-LD parsing and stores price changes in the
+product's history. Store pages can change their markup or restrict automated
+requests, so scraping results depend on each store's current availability and
+page structure.

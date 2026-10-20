@@ -1,18 +1,19 @@
 import type { Config } from "tailwindcss";
 
 const config: Config = {
+  darkMode: "class",
   content: ["./app/**/*.{js,ts,jsx,tsx,mdx}"],
   theme: {
     extend: {
       colors: {
-        ink: "#17231d",
-        muted: "#748078",
-        canvas: "#f5f7f4",
-        brand: "#1b7550",
-        "brand-light": "#e5f2eb",
+        ink: "#0f172a",
+        muted: "#64748b",
+        canvas: "#f5f6ff",
+        brand: "#6366f1",
+        "brand-light": "#e0e7ff",
       },
       boxShadow: {
-        card: "0 8px 30px rgba(29, 48, 37, 0.06)",
+        card: "0 12px 36px rgba(79, 70, 229, 0.08)",
       },
     },
   },
