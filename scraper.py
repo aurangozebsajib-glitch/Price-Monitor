@@ -134,7 +134,7 @@ def scrape_startech(url: str) -> dict[str, str]:
 
 
 if __name__ == "__main__":
-    test_url = "https://www.startech.com.bd/anker-soundcore-r50i-nc"
+    test_url = "https://www.startech.com.bd/component/processor"
     try:
         result = scrape_startech(test_url)
     except ScrapeError as exc:
