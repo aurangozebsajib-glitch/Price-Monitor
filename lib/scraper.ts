@@ -1,6 +1,15 @@
 import { load } from "cheerio";
 
-export type StoreName = "Star Tech" | "Daraz";
+export type StoreName =
+  | "Star Tech"
+  | "Daraz"
+  | "Ryans"
+  | "Pickaboo"
+  | "UCC"
+  | "Gadget & Gear"
+  | "Amazon"
+  | "BestBuy";
+type SearchableStoreName = Extract<StoreName, "Star Tech" | "Daraz">;
 
 export type ScrapedProduct = {
   url: string;
@@ -24,6 +33,12 @@ const MAX_PRODUCTS_PER_STORE_SEARCH = 2;
 const storeRoots: Record<StoreName, string> = {
   "Star Tech": "startech.com.bd",
   Daraz: "daraz.com.bd",
+  Ryans: "ryans.com",
+  Pickaboo: "pickaboo.com",
+  UCC: "ucc.com.bd",
+  "Gadget & Gear": "gadgetandgear.com",
+  Amazon: "amazon.com",
+  BestBuy: "bestbuy.com",
 };
 
 export class ScrapeError extends Error {
@@ -281,7 +296,7 @@ export async function scrapeProductUrl(input: string): Promise<ScrapedProduct> {
   };
 }
 
-function searchUrl(store: StoreName, query: string): string {
+function searchUrl(store: SearchableStoreName, query: string): string {
   if (store === "Star Tech") {
     const url = new URL("https://www.startech.com.bd/");
     url.searchParams.set("route", "product/search");
@@ -293,7 +308,7 @@ function searchUrl(store: StoreName, query: string): string {
   return url.toString();
 }
 
-function isLikelyProductLink(store: StoreName, href: string): boolean {
+function isLikelyProductLink(store: SearchableStoreName, href: string): boolean {
   let url: URL;
   try {
     url = new URL(href);
@@ -340,7 +355,7 @@ function isLikelyProductLink(store: StoreName, href: string): boolean {
 }
 
 async function searchOneStore(
-  store: StoreName,
+  store: SearchableStoreName,
   query: string,
 ): Promise<ScrapedProduct[]> {
   const { html, url: pageUrl } = await fetchStorePage(searchUrl(store, query));
@@ -374,7 +389,7 @@ async function searchOneStore(
 }
 
 export async function searchStoreProducts(query: string): Promise<ScrapedProduct[]> {
-  const stores: StoreName[] = ["Star Tech", "Daraz"];
+  const stores: SearchableStoreName[] = ["Star Tech", "Daraz"];
   const results = await Promise.allSettled(
     stores.map((store) => searchOneStore(store, query)),
   );

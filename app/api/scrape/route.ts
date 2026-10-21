@@ -1,49 +1,47 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
 import { ScrapeError, scrapeProductUrl } from "@/lib/scraper";
+import { createClient } from "@/utils/supabase/server";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-type StoreName = "Star Tech" | "Daraz";
-
-const storeDetails: Record<
-  StoreName,
-  { slug: string; country_code: string; store_type: string; website_url: string }
-> = {
-  "Star Tech": {
-    slug: "star-tech",
-    country_code: "BD",
-    store_type: "retailer",
-    website_url: "https://www.startech.com.bd",
-  },
-  Daraz: {
-    slug: "daraz",
-    country_code: "BD",
-    store_type: "marketplace",
-    website_url: "https://www.daraz.com.bd",
-  },
+type Store = {
+  id: string;
+  name: string;
+  slug: string;
+  website_url: string | null;
 };
 
 function jsonError(message: string, status: number) {
-  return NextResponse.json({ error: message }, { status });
+  return NextResponse.json({ success: false, error: message }, { status });
 }
 
-export async function POST(request: Request) {
-  let body: unknown;
+function isStoreHost(hostname: string, websiteUrl: string | null): boolean {
+  if (!websiteUrl) return false;
   try {
-    body = await request.json();
+    const storeHost = new URL(websiteUrl).hostname.toLowerCase();
+    const host = hostname.toLowerCase();
+    return host === storeHost || host.endsWith(`.${storeHost}`);
   } catch {
-    return jsonError("Request body must be valid JSON.", 400);
+    return false;
   }
+}
 
-  const url =
-    body && typeof body === "object" && "url" in body &&
-    typeof body.url === "string"
-      ? body.url.trim()
-      : "";
-  if (!url) {
-    return jsonError("Provide a product URL.", 400);
+async function scrape(urlInput: string, requestedStoreSlug?: string) {
+  let url: URL;
+  try {
+    url = new URL(urlInput);
+  } catch {
+    return jsonError("Enter a valid product URL.", 400);
+  }
+  if (
+    url.protocol !== "https:" ||
+    url.username ||
+    url.password ||
+    url.port ||
+    urlInput.length > 2048
+  ) {
+    return jsonError("Only public HTTPS store URLs are supported.", 400);
   }
 
   const supabase = await createClient();
@@ -55,117 +53,103 @@ export async function POST(request: Request) {
     return jsonError("Sign in to track products.", 401);
   }
 
+  const { data: stores, error: storesError } = await supabase
+    .from("stores")
+    .select("id, name, slug, website_url");
+  if (storesError) {
+    console.error("Could not load supported stores:", storesError.message);
+    return jsonError("Could not validate the store catalog.", 500);
+  }
+
+  const store = (stores as Store[]).find(
+    (candidate) =>
+      isStoreHost(url.hostname, candidate.website_url) &&
+      (!requestedStoreSlug || candidate.slug === requestedStoreSlug),
+  );
+  if (!store) {
+    return jsonError(
+      requestedStoreSlug
+        ? "The URL does not match the requested supported store."
+        : "This store is not supported.",
+      400,
+    );
+  }
+
   try {
-    const scraped = await scrapeProductUrl(url);
-    const storeDetailsForProduct = storeDetails[scraped.store];
-
-    const { data: existingStore, error: lookupStoreError } = await supabase
-      .from("stores")
-      .select("id, name, slug")
-      .eq("slug", storeDetailsForProduct.slug)
-      .maybeSingle();
-    if (lookupStoreError) {
-      console.error("Could not look up scraper store:", lookupStoreError.message);
-      return jsonError("Could not access the store catalog.", 500);
-    }
-
-    let store = existingStore;
-    if (!store) {
-      const { data: insertedStore, error: insertStoreError } = await supabase
-        .from("stores")
-        .insert({
-          name: scraped.store,
-          ...storeDetailsForProduct,
-        })
-        .select("id, name, slug")
-        .single();
-
-      if (insertStoreError || !insertedStore) {
-        console.error("Could not insert scraper store:", insertStoreError?.message);
-        return jsonError(
-          "Could not create the store. Check store-catalog access policies.",
-          500,
-        );
-      }
-      store = insertedStore;
-    }
-
-    const { data: product, error: productError } = await supabase
+    const scraped = await scrapeProductUrl(url.toString());
+    const now = new Date().toISOString();
+    const { data: existing, error: lookupError } = await supabase
       .from("products")
-      .upsert(
-        {
-          user_id: user.id,
-          store_id: store.id,
-          url: scraped.url,
-          title: scraped.title,
-          image_url: scraped.image,
-          current_price: scraped.currentPrice,
-          original_price: scraped.originalPrice,
-          is_out_of_stock: scraped.isOutOfStock,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "user_id,url" },
-      )
-      .select("id, user_id, store_id, url, title, image_url, current_price, original_price, is_out_of_stock")
-      .single();
-    if (productError || !product) {
-      console.error("Could not save scraped product:", productError?.message);
-      return jsonError("Could not save the product. Check the Supabase schema and access policies.", 500);
+      .select("id, price_history")
+      .eq("url", scraped.url)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (lookupError) {
+      console.error("Could not look up existing product:", lookupError.message);
+      return jsonError("Could not check for an existing product.", 500);
     }
 
-    if (scraped.currentPrice !== null) {
-      const checkedAt = new Date().toISOString();
-      const { error: priceError } = await supabase
-        .from("product_prices")
-        .upsert(
-          {
-            product_id: product.id,
-            user_id: user.id,
-            current_price: scraped.currentPrice,
-            original_price: scraped.originalPrice,
-            currency: "BDT",
-            is_out_of_stock: scraped.isOutOfStock,
-            checked_at: checkedAt,
-          },
-          { onConflict: "product_id" },
-        );
-      if (priceError) {
-        console.error("Could not update product price:", priceError.message);
-        return jsonError("Product saved, but its current price could not be updated.", 500);
-      }
+    const oldHistory = Array.isArray(existing?.price_history)
+      ? existing.price_history
+      : [];
+    const priceHistory =
+      scraped.currentPrice === null
+        ? oldHistory
+        : [
+            ...oldHistory,
+            { price: scraped.currentPrice, date: now },
+          ].slice(-100);
+    const productValues = {
+      user_id: user.id,
+      store_id: store.id,
+      url: scraped.url,
+      title: scraped.title,
+      image_url: scraped.image,
+      current_price: scraped.currentPrice,
+      original_price: scraped.originalPrice,
+      is_out_of_stock: scraped.isOutOfStock,
+      price_history: priceHistory,
+      updated_at: now,
+    };
+    const isNew = !existing;
+    const { data: product, error: saveError } = existing
+      ? await supabase
+          .from("products")
+          .update(productValues)
+          .eq("id", existing.id)
+          .eq("user_id", user.id)
+          .select("*, stores (id, name, slug, website_url)")
+          .single()
+      : await supabase
+          .from("products")
+          .insert(productValues)
+          .select("*, stores (id, name, slug, website_url)")
+          .single();
 
-      const { error: historyError } = await supabase.from("price_history").insert({
-        product_id: product.id,
-        user_id: user.id,
-        price: scraped.currentPrice,
-        original_price: scraped.originalPrice,
-        currency: "BDT",
-        recorded_at: checkedAt,
-      });
-      if (historyError) {
-        console.error("Could not append price history:", historyError.message);
-        return jsonError("Product price updated, but price history could not be recorded.", 500);
-      }
+    if (saveError || !product) {
+      console.error("Could not save scraped product:", saveError?.message);
+      return jsonError("Could not save the product.", 500);
     }
+
+    const responseProduct = {
+      ...product,
+      _id: product.id,
+      store: store.name,
+      image: product.image_url,
+      currentPrice:
+        product.current_price == null ? null : Number(product.current_price),
+      originalPrice:
+        product.original_price == null ? null : Number(product.original_price),
+      isOutOfStock: product.is_out_of_stock,
+      priceHistory: priceHistory.map((entry) => entry),
+    };
 
     return NextResponse.json({
-      products: [
-        {
-          _id: product.id,
-          url: product.url,
-          title: product.title,
-          store: store.name,
-          storeInfo: store,
-          currentPrice: scraped.currentPrice,
-          originalPrice: scraped.originalPrice,
-          image: product.image_url,
-          isOutOfStock: product.is_out_of_stock,
-          priceHistory:
-            scraped.currentPrice === null
-              ? []
-              : [{ price: scraped.currentPrice, date: new Date().toISOString() }],
-        },
-      ],
+      success: true,
+      product: responseProduct,
+      products: [responseProduct],
+      isNew,
     });
   } catch (error) {
     if (error instanceof ScrapeError) {
@@ -174,4 +158,37 @@ export async function POST(request: Request) {
     console.error("Product scrape failed:", error);
     return jsonError("Unable to scrape the product right now.", 500);
   }
+}
+
+function isRequestBody(value: unknown): value is { url?: unknown; storeSlug?: unknown } {
+  return value !== null && typeof value === "object";
+}
+
+export async function GET(request: Request) {
+  const searchParams = new URL(request.url).searchParams;
+  return scrape(
+    searchParams.get("url") ?? "",
+    searchParams.get("storeSlug") ?? undefined,
+  );
+}
+
+export async function POST(request: Request) {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return jsonError("Request body must be valid JSON.", 400);
+  }
+  if (!isRequestBody(body)) {
+    return jsonError("Request body must be an object.", 400);
+  }
+
+  const url = typeof body.url === "string" ? body.url.trim() : "";
+  const storeSlug =
+    typeof body.storeSlug === "string" ? body.storeSlug.trim() : undefined;
+  if (body.storeSlug !== undefined && !storeSlug) {
+    return jsonError("storeSlug must be a non-empty string.", 400);
+  }
+
+  return scrape(url, storeSlug);
 }

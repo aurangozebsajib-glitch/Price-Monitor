@@ -3,21 +3,71 @@ import { createClient } from "@/utils/supabase/server";
 
 export const runtime = "nodejs";
 
-function escapeLikeQuery(value: string): string {
-  return value.replace(/[\\%_,]/g, "\\$&");
+type SearchResult = {
+  _id: string;
+  url: string;
+  title: string;
+  image: string | null;
+  store: string;
+  currentPrice: number | null;
+  originalPrice: number | null;
+  isOutOfStock: boolean;
+  priceHistory: Array<{ price: number; date: string }>;
+};
+
+function toSearchResult(product: {
+  id: string;
+  url: string;
+  title: string;
+  image_url: string | null;
+  current_price: number | null;
+  original_price: number | null;
+  is_out_of_stock: boolean;
+  price_history: unknown;
+  stores: { name: string } | { name: string }[] | null;
+}): SearchResult {
+  const store = Array.isArray(product.stores)
+    ? product.stores[0]
+    : product.stores;
+  const history = Array.isArray(product.price_history)
+    ? product.price_history
+        .filter(
+          (entry): entry is { price: number; date: string } =>
+            Boolean(entry) &&
+            typeof entry === "object" &&
+            "price" in entry &&
+            typeof entry.price === "number" &&
+            "date" in entry &&
+            typeof entry.date === "string",
+        )
+    : [];
+
+  return {
+    _id: product.id,
+    url: product.url,
+    title: product.title,
+    image: product.image_url,
+    store: store?.name ?? "Unknown store",
+    currentPrice:
+      product.current_price == null ? null : Number(product.current_price),
+    originalPrice:
+      product.original_price == null ? null : Number(product.original_price),
+    isOutOfStock: product.is_out_of_stock,
+    priceHistory: history,
+  };
 }
 
-export async function GET(request: Request) {
-  const query = new URL(request.url).searchParams.get("q")?.trim();
-  if (!query) {
+async function search(query: string) {
+  const normalizedQuery = query.trim();
+  if (!normalizedQuery) {
     return NextResponse.json(
-      { error: "Provide a search query in the q parameter." },
+      { success: false, error: "Provide a search query." },
       { status: 400 },
     );
   }
-  if (query.length > 120) {
+  if (normalizedQuery.length > 120) {
     return NextResponse.json(
-      { error: "Search queries must be 120 characters or fewer." },
+      { success: false, error: "Search queries must be 120 characters or fewer." },
       { status: 400 },
     );
   }
@@ -28,86 +78,81 @@ export async function GET(request: Request) {
     error: authError,
   } = await supabase.auth.getUser();
   if (authError || !user) {
-    return NextResponse.json({ error: "Sign in to search tracked products." }, { status: 401 });
+    return NextResponse.json(
+      { success: false, error: "Sign in to search tracked products." },
+      { status: 401 },
+    );
   }
 
-  const { data, error } = await supabase
-    .from("products")
-    .select(
-      `
-        id,
-        url,
-        title,
-        image_url,
-        is_out_of_stock,
-        store:stores!inner (id, name, slug, website_url),
-        product_prices (current_price, original_price, currency, is_out_of_stock, checked_at),
-        price_history (price, original_price, currency, recorded_at)
-      `,
-    )
-    .ilike("title", `%${escapeLikeQuery(query)}%`)
-    .limit(50);
+  const select = `
+    id,
+    url,
+    title,
+    image_url,
+    current_price,
+    original_price,
+    is_out_of_stock,
+    price_history,
+    stores (name)
+  `;
+  const isUrl = /^https?:\/\//i.test(normalizedQuery);
+  const { data, error } = isUrl
+    ? await supabase
+        .from("products")
+        .select(select)
+        .eq("url", normalizedQuery)
+        .maybeSingle()
+    : await supabase
+        .from("products")
+        .select(select)
+        .ilike("title", `%${normalizedQuery.replace(/[\\%_,]/g, "\\$&")}%`)
+        .order("current_price", { ascending: true })
+        .limit(20);
 
   if (error) {
     console.error("Supabase product search failed:", error.message);
     return NextResponse.json(
-      {
-        error:
-          error.code === "PGRST200" || error.code === "PGRST205"
-            ? "Product price tables are missing. Run supabase-schema.sql."
-            : "Could not search tracked products.",
-      },
-      { status: error.code === "PGRST200" || error.code === "PGRST205" ? 503 : 500 },
+      { success: false, error: "Could not search tracked products." },
+      { status: 500 },
     );
   }
 
-  const products = (data ?? []).map((product) => {
-    const store = Array.isArray(product.store)
-      ? product.store[0]
-      : product.store;
-    const prices = Array.isArray(product.product_prices)
-      ? product.product_prices
-      : product.product_prices
-        ? [product.product_prices]
-        : [];
-    const latestPrice = prices[0] ?? null;
-    const history = Array.isArray(product.price_history)
-      ? product.price_history
-      : [];
+  const rows = Array.isArray(data) ? data : data ? [data] : [];
+  const results = rows.map((product) => toSearchResult(product));
+  const noResults = results.length === 0;
 
-    return {
-      _id: product.id,
-      url: product.url,
-      title: product.title,
-      image: product.image_url,
-      store: store?.name ?? "Unknown store",
-      storeInfo: store ?? null,
-      currentPrice:
-        latestPrice?.current_price == null
-          ? null
-          : Number(latestPrice.current_price),
-      originalPrice:
-        latestPrice?.original_price == null
-          ? null
-          : Number(latestPrice.original_price),
-      currency: latestPrice?.currency ?? "BDT",
-      isOutOfStock:
-        latestPrice?.is_out_of_stock ?? product.is_out_of_stock,
-      priceCheckedAt: latestPrice?.checked_at ?? null,
-      priceHistory: history.map((entry) => ({
-        price: Number(entry.price),
-        date: entry.recorded_at,
-      })),
-    };
+  return NextResponse.json({
+    success: true,
+    results,
+    products: results,
+    count: results.length,
+    query: normalizedQuery,
+    ...(noResults
+      ? { message: "No products found, try Track by Link" }
+      : {}),
   });
+}
 
-  products.sort((left, right) => {
-    const leftPrice = left.currentPrice;
-    const rightPrice = right.currentPrice;
-    if (leftPrice == null) return rightPrice == null ? 0 : 1;
-    if (rightPrice == null) return -1;
-    return Number(leftPrice) - Number(rightPrice);
-  });
+export async function GET(request: Request) {
+  const searchParams = new URL(request.url).searchParams;
+  return search(searchParams.get("q") ?? searchParams.get("query") ?? "");
+}
 
-  return NextResponse.json({ products });
+export async function POST(request: Request) {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { success: false, error: "Request body must be valid JSON." },
+      { status: 400 },
+    );
+  }
+
+  const query =
+    body && typeof body === "object" && "query" in body &&
+    typeof body.query === "string"
+      ? body.query
+      : "";
+  return search(query);
 }
