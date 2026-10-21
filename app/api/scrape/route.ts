@@ -3,6 +3,7 @@ import { ScrapeError, scrapeProductUrl } from "@/lib/scraper";
 import { createClient } from "@/utils/supabase/server";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 type Store = {

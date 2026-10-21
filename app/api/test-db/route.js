@@ -1,9 +1,13 @@
-import supabase from "@/lib/supabase";
+import { createClient } from "@/lib/supabase";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export async function GET() {
   const database = "pricepulse";
 
   try {
+    const supabase = createClient();
     const { data, error, count } = await supabase
       .from("stores")
       .select("*", { count: "exact" });
