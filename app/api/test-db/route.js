@@ -1,7 +1,7 @@
 import supabase from "@/lib/supabase";
 
 export async function GET() {
-  const database = process.env.MONGODB_DB || "pricepulse";
+  const database = "pricepulse";
 
   try {
     const { data, error, count } = await supabase
