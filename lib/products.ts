@@ -1,49 +1,67 @@
-import Product from "@/lib/models/Product";
-import type { ScrapedProduct } from "@/lib/scraper";
+import { createClient } from "@/utils/supabase/server";
 
-type ProductDocument = {
-  _id: unknown;
+export type ProductDocument = {
+  id: string;
+  user_id: string;
+  store_id: string;
   url: string;
-  store?: string;
-  title?: string;
-  image?: string;
-  currentPrice?: number;
-  originalPrice?: number;
-  priceHistory: Array<{ price: number; date: Date }>;
-  isOutOfStock: boolean;
-  save: () => Promise<ProductDocument>;
-  toObject: () => Record<string, unknown>;
+  title: string;
+  image_url: string | null;
+  current_price: number | null;
+  original_price: number | null;
+  is_out_of_stock: boolean;
+  price_history: unknown[];
+  created_at: string;
+  updated_at: string;
 };
 
-export async function saveScrapedProduct(
-  scraped: ScrapedProduct,
-): Promise<Record<string, unknown>> {
-  const existing = (await Product.findOne({ url: scraped.url }).exec()) as
-    | ProductDocument
-    | null;
-  const lastPrice = existing?.priceHistory.at(-1)?.price;
+type UpsertProduct = Omit<
+  ProductDocument,
+  "id" | "created_at" | "updated_at"
+> &
+  Partial<Pick<ProductDocument, "id" | "created_at" | "updated_at">>;
 
-  const product = existing ?? new Product({ url: scraped.url });
-  product.store = scraped.store;
-  product.title = scraped.title;
-  product.image = scraped.image ?? undefined;
-  product.isOutOfStock = scraped.isOutOfStock;
+export async function getProducts(): Promise<ProductDocument[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("products").select("*");
 
-  if (scraped.currentPrice !== null) {
-    product.currentPrice = scraped.currentPrice;
-    if (lastPrice !== scraped.currentPrice) {
-      product.priceHistory.push({
-        price: scraped.currentPrice,
-        date: new Date(),
-      });
-    }
-  }
-  if (scraped.originalPrice !== null) {
-    product.originalPrice = scraped.originalPrice;
+  if (error) {
+    throw new Error(`Could not get products: ${error.message}`);
   }
 
-  await product.save();
-  return product.toObject();
+  return data;
+}
+
+export async function getProductByUrl(url: string): Promise<ProductDocument> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("products")
+    .select("*")
+    .eq("url", url)
+    .single();
+
+  if (error) {
+    throw new Error(`Could not get product by URL: ${error.message}`);
+  }
+
+  return data;
+}
+
+export async function upsertProduct(
+  product: UpsertProduct,
+): Promise<ProductDocument> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("products")
+    .upsert(product, { onConflict: "user_id,url" })
+    .select("*")
+    .single();
+
+  if (error) {
+    throw new Error(`Could not upsert product: ${error.message}`);
+  }
+
+  return data;
 }
 
 export function sortProductsByPrice<T extends { currentPrice?: number | null }>(
