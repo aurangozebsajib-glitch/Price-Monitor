@@ -38,7 +38,7 @@ configurable scraper fields and seed ten local tech-store profiles before
 enabling live fallback search. Each profile stores its store type/topic, URL
 template, product selectors, enablement, and crawl priority. Profiles are
 loaded in rotating batches of ten stores, and each search is bounded to two
-pages and two products per store. F-commerce storefronts can use the same
+pages and five products per store. F-commerce storefronts can use the same
 registry when they provide a public HTTPS storefront and a searchable URL;
 Facebook pages that require sign-in or block scraping are not assumed to be
 available.
@@ -53,7 +53,7 @@ key from `.env.local` and can be safely rerun.
   an enabled store profile, upserts the public product and current price, and appends a
   JSONB price-history record when a price is available.
 - `GET /api/search?q=...` searches products sorted from lowest to highest price.
-  When there are fewer than ten database matches, it tries a bounded live
+  When there are fewer than five database matches, it tries a bounded live
   search over a rotating batch of configured stores and saves matching results
   for later searches.
 
@@ -63,3 +63,19 @@ requests, so selectors/search URL templates should be verified and maintained
 in the registry. The live Supabase schema differs from `supabase-schema.sql`;
 apply the additive registry migration to the live schema rather than applying
 the full authenticated-user schema there.
+
+### F-Commerce admin spider
+
+Open `/admin/f-commerce` to extract public external website links from
+Facebook Pages, register the resulting stores by topic, and start a bounded
+topic crawl. The admin APIs require server-only `F_COMMERCE_ADMIN_TOKEN` and
+`SUPABASE_SERVICE_ROLE_KEY` environment variables; do not expose either in
+`NEXT_PUBLIC_*` variables or commit their values. Facebook pages must be
+publicly accessible and contain a website link. Newly registered profiles use
+the common `/search?q={query}` pattern; verify each site's search behavior and
+selectors before relying on crawl results.
+
+Product search queries Supabase first and invokes a live store fallback when
+fewer than five results match. The fallback is bounded to a rotating batch of
+up to ten enabled stores and cannot guarantee five live options if stores are
+unreachable or return no matching products.

@@ -82,7 +82,12 @@ async function liveFallback(query: string) {
     .eq("scrape_enabled", true)
     .not("search_url_template", "is", null);
   if (countError) {
-    throw new Error(`Could not count scraper registry: ${countError.message}`);
+    console.error("Could not count scraper registry:", countError);
+    throw new Error(
+      countError.message || countError.details
+        ? `Could not count scraper registry: ${countError.message || countError.details}`
+        : "Scraper registry is unavailable. Apply supabase-store-registry.sql.",
+    );
   }
 
   const storePage =
@@ -97,7 +102,12 @@ async function liveFallback(query: string) {
     .order("crawl_priority", { ascending: true })
     .range(storePage * 10, storePage * 10 + 9);
   if (storeError) {
-    throw new Error(`Could not load scraper registry: ${storeError.message}`);
+    console.error("Could not load scraper registry:", storeError);
+    throw new Error(
+      `Could not load scraper registry: ${storeError.code ?? "unknown"} ${
+        storeError.message || storeError.details || "Registry schema is unavailable."
+      }`,
+    );
   }
 
   const profiles = (stores ?? []).filter(
@@ -219,7 +229,7 @@ async function search(query: string) {
   let results = rows.map((product) => toSearchResult(product as ProductRow));
   let fallbackError: string | undefined;
 
-  if (results.length < 10 && !isUrl) {
+  if (results.length < 5 && !isUrl) {
     try {
       const liveResults = await liveFallback(normalizedQuery);
       const byUrl = new Map(
@@ -249,6 +259,7 @@ async function search(query: string) {
     products: results,
     count: results.length,
     query: normalizedQuery,
+    ...(fallbackError ? { fallbackWarning: fallbackError } : {}),
     ...(noResults
       ? {
           message: fallbackError

@@ -35,7 +35,7 @@ const REQUEST_TIMEOUT_MS = 5_000;
 const MAX_HTML_BYTES = 2 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
 const MAX_PAGES_PER_STORE = 2;
-const MAX_PRODUCTS_PER_STORE = 2;
+const MAX_PRODUCTS_PER_STORE = 5;
 const STORE_BATCH_SIZE = 5;
 
 export class StaticScrapeError extends Error {
@@ -416,23 +416,39 @@ async function searchOneStore(
   return products;
 }
 
-export async function searchConfiguredStores(
+export async function searchConfiguredStoresDetailed(
   profiles: StoreScraperProfile[],
   query: string,
-): Promise<StaticScrapedProduct[]> {
+): Promise<{
+  products: StaticScrapedProduct[];
+  errors: Array<{ store: string; error: string }>;
+}> {
   const results: StaticScrapedProduct[] = [];
+  const errors: Array<{ store: string; error: string }> = [];
   for (let index = 0; index < profiles.length; index += STORE_BATCH_SIZE) {
     const batch = profiles.slice(index, index + STORE_BATCH_SIZE);
     const settled = await Promise.allSettled(
       batch.map((profile) => searchOneStore(profile, query)),
     );
-    for (const result of settled) {
+    for (const [resultIndex, result] of settled.entries()) {
       if (result.status === "fulfilled") {
         results.push(...result.value);
+      } else {
+        const reason =
+          result.reason instanceof Error ? result.reason.message : "Store search failed.";
+        errors.push({ store: batch[resultIndex].name, error: reason });
       }
     }
   }
-  return results;
+  return { products: results, errors };
+}
+
+export async function searchConfiguredStores(
+  profiles: StoreScraperProfile[],
+  query: string,
+): Promise<StaticScrapedProduct[]> {
+  const { products } = await searchConfiguredStoresDetailed(profiles, query);
+  return products;
 }
 
 export async function scrapeConfiguredProduct(
