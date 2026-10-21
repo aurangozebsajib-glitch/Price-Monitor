@@ -1,6 +1,6 @@
 import { config } from "dotenv";
 import { createClient } from "@supabase/supabase-js";
-import { searchStoreProducts } from "../lib/scraper.ts";
+import { searchConfiguredStores } from "../lib/scrapers/staticScraper.ts";
 
 config({ path: ".env.local" });
 
@@ -21,9 +21,28 @@ const seedQueries = [
   "Samsung Galaxy S24",
   "Anker Soundcore R50i NC",
 ];
+const { data: storeRows, error: storeError } = await supabase
+  .from("stores")
+  .select(
+    "id, name, slug, type, topic, base_url, search_url_template, product_container_selector, product_link_selector, pagination_selector, title_selector, price_selector, image_selector, availability_selector",
+  )
+  .eq("scrape_enabled", true)
+  .not("search_url_template", "is", null)
+  .order("crawl_priority", { ascending: true })
+  .limit(10);
+
+if (storeError) {
+  throw new Error(`Could not load scraper registry: ${storeError.message}`);
+}
+const storeProfiles = (storeRows ?? []).filter(
+  (store) =>
+    ["ecommerce", "f-commerce"].includes(store.type) &&
+    typeof store.base_url === "string" &&
+    typeof store.search_url_template === "string",
+);
 
 async function seedQuery(query) {
-  const scrapedProducts = await searchStoreProducts(query);
+  const scrapedProducts = await searchConfiguredStores(storeProfiles, query);
   const matchingProducts = scrapedProducts.filter((product) =>
     query
       .toLowerCase()

@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase";
 import {
-  ScrapeError,
-  searchStoreProducts,
-  type ScrapedProduct,
-} from "@/lib/scraper";
+  searchConfiguredStores,
+  type StaticScrapedProduct,
+  type StoreScraperProfile,
+} from "@/lib/scrapers/staticScraper";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -57,7 +57,7 @@ function matchesQuery(title: string, query: string): boolean {
   return terms.length > 0 && terms.every((term) => normalizedTitle.includes(term));
 }
 
-function toScrapedResult(product: ScrapedProduct) {
+function toScrapedResult(product: StaticScrapedProduct) {
   return {
     _id: product.url,
     url: product.url,
@@ -76,7 +76,37 @@ function toScrapedResult(product: ScrapedProduct) {
 
 async function liveFallback(query: string) {
   const supabase = createClient();
-  const scrapedProducts = await searchStoreProducts(query);
+  const { count, error: countError } = await supabase
+    .from("stores")
+    .select("slug", { count: "exact", head: true })
+    .eq("scrape_enabled", true)
+    .not("search_url_template", "is", null);
+  if (countError) {
+    throw new Error(`Could not count scraper registry: ${countError.message}`);
+  }
+
+  const storePage =
+    Math.floor(Date.now() / 60_000) % Math.max(1, Math.ceil((count ?? 0) / 10));
+  const { data: stores, error: storeError } = await supabase
+    .from("stores")
+    .select(
+      "id, name, slug, type, topic, base_url, search_url_template, product_container_selector, product_link_selector, pagination_selector, title_selector, price_selector, image_selector, availability_selector",
+    )
+    .eq("scrape_enabled", true)
+    .not("search_url_template", "is", null)
+    .order("crawl_priority", { ascending: true })
+    .range(storePage * 10, storePage * 10 + 9);
+  if (storeError) {
+    throw new Error(`Could not load scraper registry: ${storeError.message}`);
+  }
+
+  const profiles = (stores ?? []).filter(
+    (store): store is StoreScraperProfile =>
+      (store.type === "ecommerce" || store.type === "f-commerce") &&
+      typeof store.base_url === "string" &&
+      typeof store.search_url_template === "string",
+  );
+  const scrapedProducts = await searchConfiguredStores(profiles, query);
   const matches = scrapedProducts
     .filter((product) => matchesQuery(product.title, query))
     .sort(
@@ -189,12 +219,16 @@ async function search(query: string) {
   let results = rows.map((product) => toSearchResult(product as ProductRow));
   let fallbackError: string | undefined;
 
-  if (results.length === 0 && !isUrl) {
+  if (results.length < 10 && !isUrl) {
     try {
-      results = await liveFallback(normalizedQuery);
+      const liveResults = await liveFallback(normalizedQuery);
+      const byUrl = new Map(
+        [...results, ...liveResults].map((product) => [product.url, product]),
+      );
+      results = [...byUrl.values()];
     } catch (error) {
       fallbackError =
-        error instanceof ScrapeError
+        error instanceof Error
           ? error.message
           : "Live store search is temporarily unavailable.";
       console.error("Live product search fallback failed:", error);
@@ -206,6 +240,7 @@ async function search(query: string) {
       (left.currentPrice ?? Number.POSITIVE_INFINITY) -
       (right.currentPrice ?? Number.POSITIVE_INFINITY),
   );
+  results = results.slice(0, 20);
   const noResults = results.length === 0;
 
   return NextResponse.json({

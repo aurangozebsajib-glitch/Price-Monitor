@@ -32,20 +32,34 @@ the current price and JSONB `price_history` on each product row.
 separate `product_prices` and `price_history` tables. Reconcile that schema with
 the live public products schema before applying it to the active project.
 
-The `/api/test-db` route checks access to the seeded store catalog.
-Run `npm run seed:products` to scrape and upsert popular products from Star Tech
-and Daraz. The script reads the Supabase URL and publishable key from
-`.env.local` and can be safely rerun.
+The `/api/test-db` route checks access to the store catalog. Apply
+[`supabase-store-registry.sql`](./supabase-store-registry.sql) to add the
+configurable scraper fields and seed ten local tech-store profiles before
+enabling live fallback search. Each profile stores its store type/topic, URL
+template, product selectors, enablement, and crawl priority. Profiles are
+loaded in rotating batches of ten stores, and each search is bounded to two
+pages and two products per store. F-commerce storefronts can use the same
+registry when they provide a public HTTPS storefront and a searchable URL;
+Facebook pages that require sign-in or block scraping are not assumed to be
+available.
+
+Run `npm run seed:products` to scrape configured store profiles for the
+popular-product seed queries. The script reads the Supabase URL and publishable
+key from `.env.local` and can be safely rerun.
 
 ### Product search and tracking API
 
-- `POST /api/scrape` accepts `{ "url": "https://..." }`, scrapes a Star Tech or
-  Daraz product, upserts the public product and current price, and appends a
+- `POST /api/scrape` accepts `{ "url": "https://..." }`, scrapes a product from
+  an enabled store profile, upserts the public product and current price, and appends a
   JSONB price-history record when a price is available.
 - `GET /api/search?q=...` searches products sorted from lowest to highest price.
-  When there are no database matches, it tries a bounded live search on Star
-  Tech and Daraz and saves matching results for later searches.
+  When there are fewer than ten database matches, it tries a bounded live
+  search over a rotating batch of configured stores and saves matching results
+  for later searches.
 
-Scraping uses server-side HTML/JSON-LD parsing. Store pages can change their
-markup or restrict automated requests, so results depend on each store's current
-availability and page structure.
+Scraping prefers schema.org Product JSON-LD, then OpenGraph metadata, then the
+configured CSS selectors. Store pages can change markup or restrict automated
+requests, so selectors/search URL templates should be verified and maintained
+in the registry. The live Supabase schema differs from `supabase-schema.sql`;
+apply the additive registry migration to the live schema rather than applying
+the full authenticated-user schema there.

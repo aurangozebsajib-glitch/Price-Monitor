@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 import {
-  getStoreForUrl,
-  ScrapeError,
-  scrapeProductUrl,
-  type StoreName,
-} from "@/lib/scraper";
+  scrapeConfiguredProduct,
+  StaticScrapeError,
+  type StoreScraperProfile,
+} from "@/lib/scrapers/staticScraper";
 import { createClient } from "@/lib/supabase";
 
 export const runtime = "nodejs";
@@ -12,38 +11,16 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const maxDuration = 30;
 
-type Store = {
-  id: string;
-  name: string;
-  slug: string;
-};
-
-const storeSlugs: Record<StoreName, string> = {
-  "Star Tech": "star-tech",
-  Daraz: "daraz",
-  Ryans: "ryans",
-  Pickaboo: "pickaboo",
-  UCC: "ucc-bd",
-  "Gadget & Gear": "gadget-gear",
-  Amazon: "amazon",
-  BestBuy: "bestbuy",
-};
-
 function jsonError(message: string, status: number) {
   return NextResponse.json({ success: false, error: message }, { status });
 }
 
 async function scrape(urlInput: string, requestedStoreSlug?: string) {
   let url: URL;
-  let storeName: StoreName;
   try {
     url = new URL(urlInput);
-    storeName = getStoreForUrl(url.toString());
-  } catch (error) {
-    return jsonError(
-      error instanceof ScrapeError ? error.message : "Enter a valid product URL.",
-      400,
-    );
+  } catch {
+    return jsonError("Enter a valid product URL.", 400);
   }
   if (
     url.protocol !== "https:" ||
@@ -55,30 +32,32 @@ async function scrape(urlInput: string, requestedStoreSlug?: string) {
     return jsonError("Only public HTTPS store URLs are supported.", 400);
   }
 
-  const expectedSlug = storeSlugs[storeName];
-  if (requestedStoreSlug && requestedStoreSlug !== expectedSlug) {
-    return jsonError(
-      "The URL does not match the requested supported store.",
-      400,
-    );
-  }
-
   const supabase = createClient();
-  const { data: store, error: storeError } = await supabase
+  const profileFields =
+    "id, name, slug, type, topic, base_url, search_url_template, product_container_selector, product_link_selector, pagination_selector, title_selector, price_selector, image_selector, availability_selector";
+  const hostname = url.hostname.toLowerCase().replace(/^www\./, "");
+  const baseUrlCandidates = [
+    `https://${hostname}`,
+    `https://www.${hostname}`,
+  ];
+  const profileQuery = supabase
     .from("stores")
-    .select("id, name, slug")
-    .eq("slug", expectedSlug)
-    .maybeSingle();
+    .select(profileFields)
+    .eq("scrape_enabled", true);
+  const { data: storeRows, error: storeError } = requestedStoreSlug
+    ? await profileQuery.eq("slug", requestedStoreSlug).limit(1)
+    : await profileQuery.in("base_url", baseUrlCandidates).limit(1);
   if (storeError) {
     console.error("Could not validate product store:", storeError.message);
     return jsonError("Could not validate the store catalog.", 500);
   }
-  if (!store) {
-    return jsonError("This store is not available in the store catalog.", 400);
+  const store = storeRows?.[0] as StoreScraperProfile | undefined;
+  if (!store || !store.base_url) {
+    return jsonError("This store is not available in the scraper registry.", 400);
   }
 
   try {
-    const scraped = await scrapeProductUrl(url.toString());
+    const scraped = await scrapeConfiguredProduct(store, url.toString());
     const { data: existing, error: lookupError } = await supabase
       .from("products")
       .select("*")
@@ -148,7 +127,7 @@ async function scrape(urlInput: string, requestedStoreSlug?: string) {
       isNew,
     });
   } catch (error) {
-    if (error instanceof ScrapeError) {
+    if (error instanceof StaticScrapeError) {
       return jsonError(error.message, 502);
     }
     console.error("Product scrape failed:", error);
