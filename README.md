@@ -90,3 +90,18 @@ Product search queries Supabase first and invokes a live store fallback when
 fewer than five results match. The fallback is bounded to a rotating batch of
 up to ten enabled stores and cannot guarantee five live options if stores are
 unreachable or return no matching products.
+
+### Free scheduled sitemap crawler
+
+The `crawl:gadgets` script runs a native-fetch/Cheerio sitemap crawler; it does
+not use paid APIs, proxies, or a browser automation runtime. For each enabled
+Bangladesh store profile in the requested topic, it checks common product
+sitemap paths, follows same-host sitemap indexes, and processes up to 20 product
+URLs per store. Product pages are parsed by the JSON-LD-first static scraper,
+and results are upserted with a bounded JSONB price history. Daraz is
+intentionally excluded.
+
+GitHub Actions runs [crawl.yml](./.github/workflows/crawl.yml) every six hours
+and supports manual dispatch. Configure repository secrets `SUPABASE_URL` and
+`SUPABASE_SERVICE_ROLE_KEY`; the service-role key is used only by the workflow
+runner and must never be exposed to browser code.

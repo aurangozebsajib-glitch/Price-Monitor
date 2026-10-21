@@ -464,3 +464,31 @@ export async function scrapeConfiguredProduct(
     store: profile.name,
   };
 }
+
+export async function extract(
+  input: string,
+  profile?: StoreScraperProfile,
+): Promise<StaticScrapedProduct> {
+  if (profile) return scrapeConfiguredProduct(profile, input);
+  const url = new URL(input);
+  const hostname = url.hostname.replace(/^www\./i, "");
+  return scrapeConfiguredProduct(
+    {
+      id: hostname,
+      name: hostname,
+      slug: hostname.replace(/[^a-z0-9]+/gi, "-"),
+      type: "ecommerce",
+      topic: "general",
+      base_url: url.origin,
+      search_url_template: "/search?q={query}",
+      product_container_selector: null,
+      product_link_selector: null,
+      pagination_selector: null,
+      title_selector: null,
+      price_selector: null,
+      image_selector: null,
+      availability_selector: null,
+    },
+    input,
+  );
+}
