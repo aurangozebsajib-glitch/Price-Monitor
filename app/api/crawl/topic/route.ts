@@ -2,12 +2,12 @@ import { NextResponse } from "next/server";
 import {
   searchConfiguredStoresDetailed,
   type StaticScrapedProduct,
-  type StoreScraperProfile,
 } from "@/lib/scrapers/staticScraper";
 import {
   createAdminSupabaseClient,
   isFCommerceAdminRequest,
 } from "@/lib/supabase/admin";
+import { storeProfileFromRow } from "@/lib/supabase/schema";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,18 +16,6 @@ export const maxDuration = 60;
 const TOPICS = new Set(["gadgets", "fashion", "electronics"]);
 const MAX_STORES = 10;
 const MAX_RESULTS = 20;
-
-function isProfile(value: Record<string, unknown>): value is StoreScraperProfile {
-  return (
-    typeof value.id === "string" &&
-    typeof value.name === "string" &&
-    typeof value.slug === "string" &&
-    (value.type === "ecommerce" || value.type === "f-commerce") &&
-    typeof value.topic === "string" &&
-    typeof value.base_url === "string" &&
-    typeof value.search_url_template === "string"
-  );
-}
 
 function errorResponse(message: string, status: number) {
   return NextResponse.json({ success: false, error: message }, { status });
@@ -62,34 +50,67 @@ export async function POST(request: Request) {
   }
 
   try {
+    let schemaWarning: string | undefined;
+    try {
+      const migrationResponse = await fetch(
+        new URL("/api/admin/migrate", request.url),
+        {
+          method: "POST",
+          headers: {
+            authorization: request.headers.get("authorization") ?? "",
+          },
+          cache: "no-store",
+          signal: AbortSignal.timeout(10_000),
+        },
+      );
+      const migrationBody = (await migrationResponse.json()) as {
+        success?: boolean;
+        error?: string;
+      };
+      if (!migrationResponse.ok || !migrationBody.success) {
+        schemaWarning =
+          migrationBody.error ?? `Schema migration returned HTTP ${migrationResponse.status}.`;
+      }
+    } catch (error) {
+      schemaWarning =
+        error instanceof Error
+          ? `Automatic schema migration could not run: ${error.message}`
+          : "Automatic schema migration could not run.";
+    }
+
     const supabase = createAdminSupabaseClient();
     const { data: storeRows, error: storeError } = await supabase
       .from("stores")
-      .select(
-        "id, name, slug, type, topic, base_url, search_url_template, product_container_selector, product_link_selector, pagination_selector, title_selector, price_selector, image_selector, availability_selector",
-      )
-      .eq("topic", topic)
-      .eq("scrape_enabled", true)
-      .not("search_url_template", "is", null)
-      .order("crawl_priority", { ascending: true })
-      .limit(MAX_STORES);
+      .select("*")
+      .limit(1000);
     if (storeError) throw new Error(`Could not load stores: ${storeError.message}`);
 
-    const profiles = (storeRows ?? []).filter(
-      (row): row is StoreScraperProfile =>
-        Boolean(row) && isProfile(row as Record<string, unknown>),
-    );
+    const profiles = (storeRows ?? [])
+      .map(storeProfileFromRow)
+      .filter(
+        (profile): profile is NonNullable<typeof profile> =>
+          profile !== null &&
+          profile.scrape_enabled === true &&
+          profile.topic === topic,
+      )
+      .sort(
+        (left, right) =>
+          (left.crawl_priority ?? 100) - (right.crawl_priority ?? 100),
+      )
+      .slice(0, MAX_STORES);
     if (!profiles.length) {
       return NextResponse.json({
-        success: true,
+        success: !schemaWarning,
         topic,
         query,
         storesCrawled: 0,
         productsFound: 0,
         productsSaved: 0,
         products: [],
-        message: "No enabled stores are registered for this topic.",
-      });
+        message:
+          schemaWarning ??
+          "No crawlable stores are registered for this topic. Store rows need a website_url or base_url.",
+      }, { status: schemaWarning ? 503 : 200 });
     }
 
     const crawl = await searchConfiguredStoresDetailed(profiles, query);
@@ -164,6 +185,7 @@ export async function POST(request: Request) {
       productsFound: scraped.length,
       productsSaved: products.length,
       products,
+      ...(schemaWarning ? { schemaWarning } : {}),
       ...(crawl.errors.length ? { storeErrors: crawl.errors } : {}),
       ...(errors.length ? { errors } : {}),
     });

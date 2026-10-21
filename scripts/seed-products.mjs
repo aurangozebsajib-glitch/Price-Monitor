@@ -23,23 +23,51 @@ const seedQueries = [
 ];
 const { data: storeRows, error: storeError } = await supabase
   .from("stores")
-  .select(
-    "id, name, slug, type, topic, base_url, search_url_template, product_container_selector, product_link_selector, pagination_selector, title_selector, price_selector, image_selector, availability_selector",
-  )
-  .eq("scrape_enabled", true)
-  .not("search_url_template", "is", null)
-  .order("crawl_priority", { ascending: true })
-  .limit(10);
+  .select("*")
+  .limit(1000);
 
 if (storeError) {
   throw new Error(`Could not load scraper registry: ${storeError.message}`);
 }
-const storeProfiles = (storeRows ?? []).filter(
-  (store) =>
-    ["ecommerce", "f-commerce"].includes(store.type) &&
-    typeof store.base_url === "string" &&
-    typeof store.search_url_template === "string",
-);
+const storeProfiles = (storeRows ?? [])
+  .filter((store) => store.scrape_enabled !== false && store.scrape_enabled !== "false")
+  .map((store) => {
+    const baseUrl = store.base_url ?? store.website_url;
+    if (typeof baseUrl !== "string" || !store.name || !store.slug) return null;
+    let normalizedBaseUrl;
+    try {
+      normalizedBaseUrl = new URL(baseUrl).origin;
+    } catch {
+      return null;
+    }
+    return {
+      id: store.id ?? store.slug,
+      name: store.name,
+      slug: store.slug,
+      type: store.scraper_type === "f-commerce" || store.type === "f-commerce"
+        ? "f-commerce"
+        : "ecommerce",
+      topic: store.topic ?? "gadgets",
+      base_url: normalizedBaseUrl,
+      search_url_template:
+        store.search_url_template ??
+        store.search_url_pattern ??
+        store.search_path ??
+        "/search?q={query}",
+      product_container_selector: store.product_container_selector ?? store.product_selector ?? null,
+      product_link_selector: store.product_link_selector ?? store.link_selector ?? null,
+      pagination_selector: store.pagination_selector ?? null,
+      title_selector: store.title_selector ?? store.name_selector ?? null,
+      price_selector: store.price_selector ?? null,
+      image_selector: store.image_selector ?? null,
+      availability_selector: store.availability_selector ?? null,
+      scrape_enabled: true,
+      crawl_priority: Number(store.crawl_priority) || 100,
+    };
+  })
+  .filter(Boolean)
+  .sort((left, right) => (left.crawl_priority ?? 100) - (right.crawl_priority ?? 100))
+  .slice(0, 10);
 
 async function seedQuery(query) {
   const scrapedProducts = await searchConfiguredStores(storeProfiles, query);

@@ -3,8 +3,8 @@ import { createClient } from "@/lib/supabase";
 import {
   searchConfiguredStores,
   type StaticScrapedProduct,
-  type StoreScraperProfile,
 } from "@/lib/scrapers/staticScraper";
+import { storeProfileFromRow } from "@/lib/supabase/schema";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -76,47 +76,35 @@ function toScrapedResult(product: StaticScrapedProduct) {
 
 async function liveFallback(query: string) {
   const supabase = createClient();
-  const { count, error: countError } = await supabase
-    .from("stores")
-    .select("slug", { count: "exact", head: true })
-    .eq("scrape_enabled", true)
-    .not("search_url_template", "is", null);
-  if (countError) {
-    console.error("Could not count scraper registry:", countError);
-    throw new Error(
-      countError.message || countError.details
-        ? `Could not count scraper registry: ${countError.message || countError.details}`
-        : "Scraper registry is unavailable. Apply supabase-store-registry.sql.",
-    );
-  }
-
-  const storePage =
-    Math.floor(Date.now() / 60_000) % Math.max(1, Math.ceil((count ?? 0) / 10));
   const { data: stores, error: storeError } = await supabase
     .from("stores")
-    .select(
-      "id, name, slug, type, topic, base_url, search_url_template, product_container_selector, product_link_selector, pagination_selector, title_selector, price_selector, image_selector, availability_selector",
-    )
-    .eq("scrape_enabled", true)
-    .not("search_url_template", "is", null)
-    .order("crawl_priority", { ascending: true })
-    .range(storePage * 10, storePage * 10 + 9);
+    .select("*")
+    .limit(1000);
   if (storeError) {
     console.error("Could not load scraper registry:", storeError);
     throw new Error(
-      `Could not load scraper registry: ${storeError.code ?? "unknown"} ${
-        storeError.message || storeError.details || "Registry schema is unavailable."
-      }`,
+      `Could not load scraper registry: ${storeError.message || storeError.code || "database error"}`,
     );
   }
 
-  const profiles = (stores ?? []).filter(
-    (store): store is StoreScraperProfile =>
-      (store.type === "ecommerce" || store.type === "f-commerce") &&
-      typeof store.base_url === "string" &&
-      typeof store.search_url_template === "string",
-  );
-  const scrapedProducts = await searchConfiguredStores(profiles, query);
+  const profiles = (stores ?? [])
+    .map(storeProfileFromRow)
+    .filter(
+      (profile): profile is NonNullable<typeof profile> =>
+        profile !== null &&
+        profile.scrape_enabled === true &&
+        (profile.type === "ecommerce" || profile.type === "f-commerce"),
+    )
+    .sort((left, right) => (left.crawl_priority ?? 100) - (right.crawl_priority ?? 100));
+  if (!profiles.length) {
+    throw new Error(
+      "No crawlable stores are registered. Store rows need a base_url or website_url; run the admin migration and register sites.",
+    );
+  }
+  const storeBatchCount = Math.ceil(profiles.length / 10);
+  const storePage = Math.floor(Date.now() / 60_000) % storeBatchCount;
+  const batch = profiles.slice(storePage * 10, storePage * 10 + 10);
+  const scrapedProducts = await searchConfiguredStores(batch, query);
   const matches = scrapedProducts
     .filter((product) => matchesQuery(product.title, query))
     .sort(

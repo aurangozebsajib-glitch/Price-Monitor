@@ -16,6 +16,8 @@ export type StoreScraperProfile = {
   price_selector: string | null;
   image_selector: string | null;
   availability_selector: string | null;
+  scrape_enabled?: boolean;
+  crawl_priority?: number;
 };
 
 export type StaticScrapedProduct = {

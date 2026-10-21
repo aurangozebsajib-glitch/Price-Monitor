@@ -5,6 +5,7 @@ import {
   createAdminSupabaseClient,
   isFCommerceAdminRequest,
 } from "@/lib/supabase/admin";
+import { migrateStoreSchema } from "@/lib/supabase/schema";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -253,6 +254,18 @@ export async function POST(request: Request) {
 
   try {
     const supabase = createAdminSupabaseClient();
+    const migration = await migrateStoreSchema(supabase);
+    if (!migration.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          extracted,
+          error: migration.error,
+        },
+        { status: 503 },
+      );
+    }
+
     const rowsBySlug = new Map<string, Record<string, unknown>>();
     for (const page of candidates) {
       const baseUrl = new URL(page.websiteUrl).origin;
@@ -261,18 +274,25 @@ export async function POST(request: Request) {
         slug: storeSlug(page.websiteUrl),
         country_code: "BD",
         type: "f-commerce",
+        scraper_type: "static",
         topic,
         base_url: baseUrl,
         website_url: page.websiteUrl,
+        fb_page_url: page.pageUrl,
         search_url_template: "/search?q={query}",
+        search_url_pattern: "/search?q={query}",
+        search_path: "/search?q={query}",
         product_container_selector: null,
         product_link_selector: "a[href]",
+        link_selector: "a[href]",
+        product_selector: null,
         pagination_selector: null,
         title_selector: "h1",
+        name_selector: "h1",
         price_selector: null,
         image_selector: "img",
         availability_selector: null,
-        scrape_enabled: true,
+        scrape_enabled: "true",
         crawl_priority: 50,
       };
       rowsBySlug.set(row.slug, row);
@@ -281,7 +301,7 @@ export async function POST(request: Request) {
     const { data, error } = await supabase
       .from("stores")
       .upsert(rows, { onConflict: "slug" })
-      .select("name, slug, topic, base_url, scrape_enabled");
+      .select("name, slug, type, country_code");
     if (error) throw new Error(error.message);
 
     return NextResponse.json({

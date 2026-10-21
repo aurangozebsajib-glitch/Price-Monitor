@@ -75,6 +75,17 @@ publicly accessible and contain a website link. Newly registered profiles use
 the common `/search?q={query}` pattern; verify each site's search behavior and
 selectors before relying on crawl results.
 
+The crawl and Facebook-registration APIs attempt the fixed-column migration
+through an existing service-role `exec_sql` RPC. The migration endpoint only
+submits the application's hard-coded, whitelisted `ALTER TABLE` statement; it
+does not create an arbitrary-SQL RPC. Supabase REST cannot create SQL functions
+or run DDL by itself. If `exec_sql` is not already installed, `/api/admin/migrate`
+returns a clear setup error and the reviewed SQL in
+[`supabase-store-registry.sql`](./supabase-store-registry.sql) must be applied
+through a trusted database migration connection. Store reads use `select("*")`
+and tolerate absent optional configuration fields, so an old schema will not
+cause PostgREST missing-column errors during ordinary search.
+
 Product search queries Supabase first and invokes a live store fallback when
 fewer than five results match. The fallback is bounded to a rotating batch of
 up to ten enabled stores and cannot guarantee five live options if stores are

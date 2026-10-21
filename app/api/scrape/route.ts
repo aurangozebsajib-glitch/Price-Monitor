@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import {
   scrapeConfiguredProduct,
   StaticScrapeError,
-  type StoreScraperProfile,
 } from "@/lib/scrapers/staticScraper";
 import { createClient } from "@/lib/supabase";
+import { storeProfileFromRow } from "@/lib/supabase/schema";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,26 +33,27 @@ async function scrape(urlInput: string, requestedStoreSlug?: string) {
   }
 
   const supabase = createClient();
-  const profileFields =
-    "id, name, slug, type, topic, base_url, search_url_template, product_container_selector, product_link_selector, pagination_selector, title_selector, price_selector, image_selector, availability_selector";
-  const hostname = url.hostname.toLowerCase().replace(/^www\./, "");
-  const baseUrlCandidates = [
-    `https://${hostname}`,
-    `https://www.${hostname}`,
-  ];
-  const profileQuery = supabase
+  const { data: storeRows, error: storeError } = await supabase
     .from("stores")
-    .select(profileFields)
-    .eq("scrape_enabled", true);
-  const { data: storeRows, error: storeError } = requestedStoreSlug
-    ? await profileQuery.eq("slug", requestedStoreSlug).limit(1)
-    : await profileQuery.in("base_url", baseUrlCandidates).limit(1);
+    .select("*")
+    .limit(1000);
   if (storeError) {
     console.error("Could not validate product store:", storeError.message);
     return jsonError("Could not validate the store catalog.", 500);
   }
-  const store = storeRows?.[0] as StoreScraperProfile | undefined;
-  if (!store || !store.base_url) {
+  const store = (storeRows ?? [])
+    .map(storeProfileFromRow)
+    .find((profile) => {
+      if (!profile?.scrape_enabled) return false;
+      if (requestedStoreSlug && profile.slug !== requestedStoreSlug) return false;
+      const registeredHost = new URL(profile.base_url).hostname.toLowerCase().replace(/^www\./, "");
+      const requestHost = url.hostname.toLowerCase().replace(/^www\./, "");
+      return (
+        requestHost === registeredHost ||
+        requestHost.endsWith(`.${registeredHost}`)
+      );
+    });
+  if (!store) {
     return jsonError("This store is not available in the scraper registry.", 400);
   }
 
