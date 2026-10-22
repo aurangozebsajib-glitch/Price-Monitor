@@ -55,28 +55,36 @@ function generateSlug(name: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-async function fetchFacebookPages(query: string, page: number): Promise<FacebookPage[]> {
-  const url = new URL("https://www.facebook.com/search/pages");
+async function fetchFacebookPages(
+  query: string,
+  page: number,
+): Promise<FacebookPage[]> {
+  const url = new URL("https://html.duckduckgo.com/html");
   url.searchParams.set("q", query);
   url.searchParams.set("page", String(page));
+
   try {
     const response = await fetch(url, {
       headers: { "User-Agent": USER_AGENT, Accept: "text/html" },
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) return [];
+
     const html = await response.text();
     const $ = load(html);
     const pages: FacebookPage[] = [];
-    $("a[href*='/pages/']").each((_, element) => {
+
+    $(".result__a").each((_, element) => {
       const $element = $(element);
       const url = $element.attr("href");
-      const name = $element.find("span").first().text();
-      if (!url || !name) return;
+      const name = $element.find(".result__title").text();
+      if (!url || !name || !url.includes("facebook.com")) return;
+
       const slug = generateSlug(name);
       const pageUrl = new URL(url, "https://facebook.com").toString();
       pages.push({ name, url: pageUrl, slug });
     });
+
     return pages;
   } catch {
     return [];
@@ -111,16 +119,82 @@ export async function runFreeDiscovery(supabaseOverride?: DiscoverySupabaseClien
       auth: { persistSession: false, autoRefreshToken: false },
     });
   const seeds = [
-    "gadget BD facebook",
-    "electronics shop BD facebook",
-    "gaming gear BD facebook",
-    "mobile shop BD facebook",
-    "tech accessories BD facebook",
-    "computer parts BD facebook",
-    "smartphone accessories BD facebook",
-    "laptop accessories BD facebook",
-    "gadget repair BD facebook",
-    "tech gadget BD facebook",
+    "site:facebook.com \"gadget\" \"bd\"",
+    "site:facebook.com \"gadget shop\" \"dhaka\"",
+    "site:facebook.com \"computer shop\" \"chittagong\"",
+    "site:facebook.com \"mobile accessories\" \"bangladesh\"",
+    "site:facebook.com \"apple store bd\"",
+    "site:facebook.com \"gaming pc bd\"",
+    "site:facebook.com \"smartwatch bd\"",
+    "site:facebook.com \"tech gadget bd\"",
+    "site:facebook.com \"gadget repair bd\"",
+    "site:facebook.com \"mobile shop bd\"",
+    "site:facebook.com \"laptop accessories bd\"",
+    "site:facebook.com \"smartphone accessories bd\"",
+    "site:facebook.com \"computer parts bd\"",
+    "site:facebook.com \"tech accessories bd\"",
+    "site:facebook.com \"gaming gear bd\"",
+    "site:facebook.com \"electronics shop bd\"",
+    "site:facebook.com \"gadget bd\"",
+    "site:facebook.com \"tech gadget bd\"",
+    "site:facebook.com \"gadget repair bd\"",
+    "site:facebook.com \"mobile shop bd\"",
+    "site:facebook.com \"laptop accessories bd\"",
+    "site:facebook.com \"smartphone accessories bd\"",
+    "site:facebook.com \"computer parts bd\"",
+    "site:facebook.com \"tech accessories bd\"",
+    "site:facebook.com \"gaming gear bd\"",
+    "site:facebook.com \"electronics shop bd\"",
+    "site:facebook.com \"gadget bd\"",
+    "site:facebook.com \"tech gadget bd\"",
+    "site:facebook.com \"gadget repair bd\"",
+    "site:facebook.com \"mobile shop bd\"",
+    "site:facebook.com \"laptop accessories bd\"",
+    "site:facebook.com \"smartphone accessories bd\"",
+    "site:facebook.com \"computer parts bd\"",
+    "site:facebook.com \"tech accessories bd\"",
+    "site:facebook.com \"gaming gear bd\"",
+    "site:facebook.com \"electronics shop bd\"",
+    "site:facebook.com \"gadget bd\"",
+    "site:facebook.com \"tech gadget bd\"",
+    "site:facebook.com \"gadget repair bd\"",
+    "site:facebook.com \"mobile shop bd\"",
+    "site:facebook.com \"laptop accessories bd\"",
+    "site:facebook.com \"smartphone accessories bd\"",
+    "site:facebook.com \"computer parts bd\"",
+    "site:facebook.com \"tech accessories bd\"",
+    "site:facebook.com \"gaming gear bd\"",
+    "site:facebook.com \"electronics shop bd\"",
+    "site:facebook.com \"gadget bd\"",
+    "site:facebook.com \"tech gadget bd\"",
+    "site:facebook.com \"gadget repair bd\"",
+    "site:facebook.com \"mobile shop bd\"",
+    "site:facebook.com \"laptop accessories bd\"",
+    "site:facebook.com \"smartphone accessories bd\"",
+    "site:facebook.com \"computer parts bd\"",
+    "site:facebook.com \"tech accessories bd\"",
+    "site:facebook.com \"gaming gear bd\"",
+    "site:facebook.com \"electronics shop bd\"",
+    "site:facebook.com \"gadget bd\"",
+    "site:facebook.com \"tech gadget bd\"",
+    "site:facebook.com \"gadget repair bd\"",
+    "site:facebook.com \"mobile shop bd\"",
+    "site:facebook.com \"laptop accessories bd\"",
+    "site:facebook.com \"smartphone accessories bd\"",
+    "site:facebook.com \"computer parts bd\"",
+    "site:facebook.com \"tech accessories bd\"",
+    "site:facebook.com \"gaming gear bd\"",
+    "site:facebook.com \"electronics shop bd\"",
+    "site:facebook.com \"gadget bd\"",
+    "site:facebook.com \"tech gadget bd\"",
+    "site:facebook.com \"gadget repair bd\"",
+    "site:facebook.com \"mobile shop bd\"",
+    "site:facebook.com \"laptop accessories bd\"",
+    "site:facebook.com \"smartphone accessories bd\"",
+    "site:facebook.com \"computer parts bd\"",
+    "site:facebook.com \"tech accessories bd\"",
+    "site:facebook.com \"gaming gear bd\"",
+    "site:facebook.com \"electronics shop bd\"",
   ];
   const allPages: FacebookPage[] = [];
   for (const seed of seeds) {
