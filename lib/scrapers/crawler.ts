@@ -360,13 +360,13 @@ async function discoverViaPagination(
     "/catalog/page/{page}",
     "/shop/page/{page}",
     "/search/page/{page}",
-    "/category/keyboard/?page={page}",
-    "/category/peripherals/?page={page}",
-    "/category/accessories/?page={page}",
-    "/category/tech/?page={page}",
-    "/category/keyboard-and-mouse/?page={page}",
-    "/category/keyboard-set/?page={page}",
-    "/category/keyboard-gaming/?page={page}",
+    "/category/monitor/?page={page}",
+    "/category/display/?page={page}",
+    "/category/screen/?page={page}",
+    "/category/monitor-and-display/?page={page}",
+    "/category/monitor-set/?page={page}",
+    "/category/monitor-gaming/?page={page}",
+    "/category/desktop-screen/?page={page}",
   ];
 
   for (const pattern of paginationPatterns) {
