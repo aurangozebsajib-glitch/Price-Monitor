@@ -360,6 +360,13 @@ async function discoverViaPagination(
     "/catalog/page/{page}",
     "/shop/page/{page}",
     "/search/page/{page}",
+    "/category/keyboard/?page={page}",
+    "/category/peripherals/?page={page}",
+    "/category/accessories/?page={page}",
+    "/category/tech/?page={page}",
+    "/category/keyboard-and-mouse/?page={page}",
+    "/category/keyboard-set/?page={page}",
+    "/category/keyboard-gaming/?page={page}",
   ];
 
   for (const pattern of paginationPatterns) {

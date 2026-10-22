@@ -53,8 +53,20 @@ function toSearchResult(product: ProductRow) {
 
 function matchesQuery(title: string, query: string): boolean {
   const normalizedTitle = title.toLowerCase();
-  const terms = query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-  return terms.length > 0 && terms.every((term) => normalizedTitle.includes(term));
+  const queryTerms = query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  const titleTerms = normalizedTitle.match(/[\p{L}\p{N}]+/gu) ?? [];
+  
+  // Match if all query terms are present in title terms
+  const allTermsMatch = queryTerms.every(term =>
+    titleTerms.some(titleTerm => titleTerm.includes(term))
+  );
+  
+  // Alternative: Fuzzy match with at least 2 terms matching
+  const fuzzyMatch = queryTerms.filter(term =>
+    titleTerms.some(titleTerm => titleTerm.includes(term))
+  ).length >= Math.min(2, queryTerms.length);
+  
+  return allTermsMatch || fuzzyMatch;
 }
 
 function toScrapedResult(product: StaticScrapedProduct) {
