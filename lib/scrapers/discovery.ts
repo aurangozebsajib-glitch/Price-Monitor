@@ -91,6 +91,31 @@ async function fetchFacebookPages(
   }
 }
 
+async function validateFacebookPage(url: string): Promise<boolean> {
+  try {
+    const response = await fetch(url, {
+      headers: { "User-Agent": USER_AGENT },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) return false;
+
+    const html = await response.text();
+    const $ = load(html);
+
+    // Check for commerce indicators
+    const isStore = $("body").text().match(/\b(shop|store|buy|price|order|delivery|\+880|017|018|019|013|014|015|016)\b/i);
+    if (!isStore) return false;
+
+    // Check for Facebook page type
+    const isPage = $("meta[property='og:type']").attr("content") === "profile";
+    if (isPage) return false;
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function upsertStores(supabase: DiscoverySupabaseClient, pages: FacebookPage[]): Promise<number> {
   const stores = pages.map((page) => ({
     name: page.name,
