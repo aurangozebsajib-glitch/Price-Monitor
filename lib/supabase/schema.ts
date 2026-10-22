@@ -24,6 +24,8 @@ export const ALL_COLUMNS = [
   "product_count",
   "country_code",
   "logo_url",
+  "discovered_from",
+  "is_valid",
 ] as const;
 
 const COLUMN_TYPES: Record<(typeof ALL_COLUMNS)[number], string> = {
@@ -49,6 +51,8 @@ const COLUMN_TYPES: Record<(typeof ALL_COLUMNS)[number], string> = {
   product_count: "INTEGER",
   country_code: "TEXT",
   logo_url: "TEXT",
+  discovered_from: "TEXT",
+  is_valid: "BOOLEAN",
 };
 
 export const STORE_SCHEMA_SQL = `ALTER TABLE public.stores ${ALL_COLUMNS.map(

@@ -58,6 +58,7 @@ export async function POST(request: Request) {
           method: "POST",
           headers: {
             authorization: request.headers.get("authorization") ?? "",
+            "x-admin-token": request.headers.get("x-admin-token") ?? "",
           },
           cache: "no-store",
           signal: AbortSignal.timeout(10_000),

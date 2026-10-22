@@ -317,9 +317,31 @@ export function parseProductHtml(
   };
 }
 
+/**
+ * Store-specific search URL overrides for Bangladeshi e-commerce sites.
+ * These handle sites that use non-standard search URL patterns.
+ */
+const STORE_SEARCH_OVERRIDES: Record<string, string> = {
+  "star-tech": "/index.php?route=product/search&search={query}",
+  "daraz": "/?s={query}",
+  "pickaboo": "/index.php?route=product/search&search={query}",
+  "ryans": "/index.php?route=product/search&search={query}",
+  "amazon": "/s?k={query}",
+  "bestbuy": "/search?search={query}",
+};
+
+function getEffectiveSearchTemplate(profile: StoreScraperProfile): string {
+  // Use override if available for this slug, otherwise use configured template
+  if (STORE_SEARCH_OVERRIDES[profile.slug]) {
+    return STORE_SEARCH_OVERRIDES[profile.slug];
+  }
+  return profile.search_url_template ?? "/search?q={query}";
+}
+
 function buildSearchUrl(profile: StoreScraperProfile, query: string, page: number) {
   const encodedQuery = encodeURIComponent(query);
-  const rawUrl = profile.search_url_template
+  const template = getEffectiveSearchTemplate(profile);
+  const rawUrl = template
     .replaceAll("{query}", encodedQuery)
     .replaceAll("{page}", String(page));
   return assertStoreUrl(new URL(rawUrl, profile.base_url).toString(), safeBaseUrl(profile.base_url));
@@ -399,7 +421,7 @@ async function searchOneStore(
 
     pageUrl =
       paginationUrl(fetched.html, fetched.url, profile) ??
-      (profile.search_url_template.includes("{page}")
+      (getEffectiveSearchTemplate(profile).includes("{page}")
         ? buildSearchUrl(profile, query, page + 1).toString()
         : null);
   }

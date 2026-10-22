@@ -3,12 +3,16 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 export function isFCommerceAdminRequest(request: Request): boolean {
   const expected = process.env.F_COMMERCE_ADMIN_TOKEN;
+  if (!expected) return false;
+
+  // Support both Authorization: Bearer <token> and x-admin-token: <token>
   const authorization = request.headers.get("authorization") ?? "";
+  const customToken = request.headers.get("x-admin-token") ?? "";
   const supplied = authorization.startsWith("Bearer ")
     ? authorization.slice("Bearer ".length)
-    : "";
+    : customToken;
 
-  if (!expected || !supplied) return false;
+  if (!supplied) return false;
   const expectedBuffer = Buffer.from(expected);
   const suppliedBuffer = Buffer.from(supplied);
   return (

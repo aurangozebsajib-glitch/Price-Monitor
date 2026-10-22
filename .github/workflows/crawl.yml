@@ -10,6 +10,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Validate required secrets
+        run: |
+          if [ -z "${{ secrets.SUPABASE_URL }}" ] || [ -z "${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" ]; then
+            echo "ERROR: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set"
+            exit 1
+          fi
+          echo "Supabase credentials validated"
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:

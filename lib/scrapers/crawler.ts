@@ -13,7 +13,13 @@ const MAX_SITEMAPS_PER_STORE = 5;
 const MAX_SITEMAP_BYTES = 5 * 1024 * 1024;
 const STORE_BATCH_SIZE = 5;
 const PRODUCT_BATCH_SIZE = 5;
-const SITEMAP_TIMEOUT_MS = 10_000;
+const SITEMAP_TIMEOUT_MS = 5_000;
+
+// Pagination discovery constants
+const MAX_PAGINATION_PAGES = 3;
+const PAGINATION_DELAY_MS = 200;
+const MAX_PAGINATION_BYTES = 2 * 1024 * 1024;
+const PAGINATION_TIMEOUT_MS = 5_000;
 
 type Json =
   | string
@@ -212,6 +218,174 @@ async function discoverProductUrls(profile: StoreScraperProfile): Promise<string
           queued.set(nestedUrl.toString(), nestedUrl);
         }
       }
+    }
+  }
+
+  // If sitemaps didn't yield enough products, try pagination discovery
+  if (productUrls.size < MAX_PRODUCTS_PER_STORE) {
+    return discoverViaPagination(profile, productUrls);
+  }
+
+  return [...productUrls].slice(0, MAX_PRODUCTS_PER_STORE);
+}
+
+async function fetchPageForPagination(
+  url: URL,
+  baseUrl: URL,
+): Promise<string | null> {
+  const safeUrl = sitemapCandidate(url.toString(), baseUrl);
+  if (!safeUrl) return null;
+
+  try {
+    const response = await fetch(safeUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; PricePulse/1.0)",
+        Accept: "text/html,application/xhtml+xml",
+        "Accept-Language": "en-BD,en;q=0.9",
+      },
+      cache: "no-store",
+      redirect: "manual",
+      signal: AbortSignal.timeout(PAGINATION_TIMEOUT_MS),
+    });
+
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location");
+      if (!location) return null;
+      const redirected = sitemapCandidate(
+        new URL(location, safeUrl).toString(),
+        baseUrl,
+      );
+      if (!redirected) return null;
+      const redirectedResponse = await fetch(redirected, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (compatible; PricePulse/1.0)",
+          Accept: "text/html,application/xhtml+xml",
+          "Accept-Language": "en-BD,en;q=0.9",
+        },
+        cache: "no-store",
+        redirect: "manual",
+        signal: AbortSignal.timeout(PAGINATION_TIMEOUT_MS),
+      });
+      if (!redirectedResponse.ok) return null;
+      const html = await redirectedResponse.text();
+      return Buffer.byteLength(html, "utf8") <= MAX_PAGINATION_BYTES
+        ? html
+        : null;
+    }
+
+    if (!response.ok) return null;
+    const html = await response.text();
+    return Buffer.byteLength(html, "utf8") <= MAX_PAGINATION_BYTES ? html : null;
+  } catch {
+    return null;
+  }
+}
+
+function extractProductLinksFromPage(
+  html: string,
+  pageUrl: string,
+  profile: StoreScraperProfile,
+): string[] {
+  const $ = load(html);
+  const links = new Set<string>();
+  let baseUrl: URL;
+  try {
+    baseUrl = new URL(profile.base_url);
+  } catch {
+    return [];
+  }
+
+  const containerSelector = profile.product_container_selector;
+  const linkSelector = profile.product_link_selector || "a[href]";
+
+  const collect = (
+    selector: string,
+    within?: ReturnType<typeof $>,
+  ) => {
+    const scope = within ? within.find(selector) : $(selector);
+    scope.each((_, el) => {
+      const href = $(el).attr("href");
+      if (!href) return;
+      try {
+        const url = new URL(href, pageUrl);
+        if (
+          url.protocol === "https:" &&
+          url.hostname.replace(/^www\./, "") ===
+            baseUrl.hostname.replace(/^www\./, "") &&
+          !url.username &&
+          !url.password &&
+          !url.port
+        ) {
+          links.add(url.toString());
+        }
+      } catch {
+        // Skip invalid URLs
+      }
+    });
+  };
+
+  if (containerSelector) {
+    $(containerSelector).each((_, container) => {
+      const $container = $(container);
+      collect(linkSelector, $container);
+    });
+  } else {
+    collect(linkSelector);
+  }
+
+  return [...links];
+}
+
+async function discoverViaPagination(
+  profile: StoreScraperProfile,
+  existingUrls: Set<string>,
+): Promise<string[]> {
+  const baseUrl = new URL(profile.base_url);
+  const productUrls = new Set<string>(existingUrls);
+
+  if (productUrls.size >= MAX_PRODUCTS_PER_STORE) {
+    return [...productUrls].slice(0, MAX_PRODUCTS_PER_STORE);
+  }
+
+  const paginationPatterns = [
+    "/?page={page}",
+    "/products/?page={page}",
+    "/category/?page={page}",
+    "/catalog/?page={page}",
+    "/shop/?page={page}",
+    "/search/?page={page}",
+    "/page/{page}",
+    "/products/page/{page}",
+    "/category/page/{page}",
+    "/catalog/page/{page}",
+    "/shop/page/{page}",
+    "/search/page/{page}",
+  ];
+
+  for (const pattern of paginationPatterns) {
+    if (productUrls.size >= MAX_PRODUCTS_PER_STORE) break;
+
+    for (let page = 1; page <= MAX_PAGINATION_PAGES; page++) {
+      if (productUrls.size >= MAX_PRODUCTS_PER_STORE) break;
+
+      const path = pattern.replace("{page}", String(page));
+      const pageUrl = new URL(path, baseUrl);
+
+      try {
+        const html = await fetchPageForPagination(pageUrl, baseUrl);
+        if (!html) continue;
+
+        const links = extractProductLinksFromPage(html, pageUrl.toString(), profile);
+        for (const link of links) {
+          productUrls.add(link);
+          if (productUrls.size >= MAX_PRODUCTS_PER_STORE) break;
+        }
+      } catch {
+        // Continue to next pattern/page
+      }
+
+      // 1s delay between pages
+      await new Promise((resolve) => setTimeout(resolve, PAGINATION_DELAY_MS));
     }
   }
 
